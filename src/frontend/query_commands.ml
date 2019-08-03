@@ -31,7 +31,7 @@ open Misc
 open Query_protocol
 module Printtyp = Type_utils.Printtyp
 
-let _line_ranges source =
+let line_ranges source =
   let to_token_range line =
     let chars =
       ["!"; "\""; "#"; "$"; "%"; "&"; "'"; "*"; "+"
@@ -795,41 +795,49 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
     Format.printf "LISF triggered";
     let raw_source = Mpipeline.raw_source pipeline in
     let source = raw_source |> Msource.text in
-    let _line_ranges = _line_ranges source in
-    let _multiple_jsons : string list =
-      Core.List.foldi _line_ranges ~init:[] ~f:(fun line acc character_ranges ->
-          Format.eprintf "%2.0f%%%!" ((Core.Int.to_float line) /. (Core.Int.to_float (List.length _line_ranges)) *. 100.0);
+    let line_ranges = line_ranges source in
+    let entries : String.Set.t =
+      Core.List.foldi line_ranges ~init:String.Set.empty ~f:(fun line acc character_ranges ->
+          Format.eprintf "%2.0f%%%!" ((Core.Int.to_float line) /. (Core.Int.to_float (List.length line_ranges)) *. 100.0);
           Format.eprintf "\x1b[999D";
           Format.eprintf "\x1b[2K";
           Core.List.fold character_ranges ~init:acc ~f:(fun acc character ->
-              try
-                let range = `Logical (line+1, character) in
-                (*let enclosing = dispatch pipeline (Query_protocol.Enclosing range) in
-                  let json = dispatch pipeline (Query_protocol.Locate (prefix,lookfor,range)) in*)
-                let _type_info =
-                  let result =
-                    dispatch pipeline (Query_protocol.Type_enclosing (None,range,Some 0))
-                  in
-                  match result with
-                  | (_, `String type_info, _) :: _ ->
-                    Format.printf "Type_info: %s@." type_info;
-                    Some type_info
-                  | _ -> None
+              let range = `Logical (line+1, character) in
+              (*let enclosing = dispatch pipeline (Query_protocol.Enclosing range) in
+                let json = dispatch pipeline (Query_protocol.Locate (prefix,lookfor,range)) in*)
+              let type_result =
+                let results =
+                  dispatch pipeline (Query_protocol.Type_enclosing (None,range,Some 0))
                 in
-                let json = `List [] in
-                let json =
-                  `Assoc
-                    [ "position", `List [`Int (line+1); `Int character]
-                    ; "enclosing", `List []
-                    ; "result", json
-                    ]
+                (* START: Copy-pasta query_json *)
+                let with_location ?(skip_none=false) loc assoc =
+                  if skip_none && loc = Location.none then
+                    `Assoc assoc
+                  else
+                    `Assoc (("start", Lexing.json_of_position loc.Location.loc_start) ::
+                            ("end",   Lexing.json_of_position loc.Location.loc_end) ::
+                            assoc)
                 in
+                let json_of_type_loc (loc,desc,_) =
+                  with_location loc [
+                    "type", (match desc with
+                        | `String _ as str -> str
+                        | `Index n -> `Int n)
+                  ]
+                in
+                (* END: Copy-pasta query_json *)
+                (* Take the first result *)
+                match results with
+                | hd :: _ -> Some (json_of_type_loc hd)
+                | _ -> None
+              in
+              match type_result with
+              | Some json ->
                 let stringified_json = Std.Json.to_string json in
-                stringified_json::acc
-              with _ -> acc)
-          |> Core.List.dedup_and_sort ~compare:Core.String.compare
-        )
+                String.Set.add stringified_json acc
+              | None -> acc))
     in
+    String.Set.iter entries ~f:(Format.printf "%s@.");
     `List []
 
   | Version ->
