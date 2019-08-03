@@ -146,7 +146,7 @@ let dump pipeline = function
             | `String "end" -> `End
             | `Int offset -> `Offset offset
             | `Assoc props ->
-              begin match List.assoc "line" props, List.assoc "col" props with
+              begin match List.assoc "line" props, List.assoc "character" props with
                 | `Int line, `Int col -> `Logical (line,col)
                 | _ -> failwith "Incorrect position"
                 | exception Not_found -> failwith "Incorrect position"
@@ -850,8 +850,11 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
         | _ -> None
       in
       match json with
-      | Some json -> Some (`List [first_range; json])
       | None -> None
+      | Some json ->
+        match first_range with
+        | `Assoc fields -> Some (`Assoc (fields@["definition", json]))
+        | _ -> None
     in
     let entries : String.Set.t =
       Core.List.foldi line_ranges ~init:String.Set.empty ~f:(fun line acc character_ranges ->
