@@ -4,7 +4,7 @@
 (library
  (name      query_protocol)
  (modules   query_protocol)
- (libraries merlin_kernel merlin_utils parsing))
+ (libraries core merlin_kernel merlin_utils parsing))
 
 (executable
  (name ocamlmerlin_server)
