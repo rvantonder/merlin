@@ -380,6 +380,15 @@ Returns either:
     end
   ;
 
+  command "lsif"
+    ~spec: []
+    ~doc:"Dump LSIF data."
+    ~default:()
+    begin fun buffer () ->
+      run buffer (Query_protocol.Lsif)
+    end
+  ;
+
   command "outline"
     ~spec:[]
     ~doc:"Returns a tree of objects `{'start': position, 'end': position, \

@@ -31,6 +31,28 @@ open Misc
 open Query_protocol
 module Printtyp = Type_utils.Printtyp
 
+let _line_ranges source =
+  let to_token_range line =
+    let chars =
+      ["!"; "\""; "#"; "$"; "%"; "&"; "'"; "*"; "+"
+      ; ","; "-"; "."; "/"; ":"; ";"; "<"; "="; ">"
+      ; "?"; "@"; ","; "("; ")"; "{"; "}"; "["; "]"
+      ; "~"; "`"] in
+    let type_at_locations =
+      List.concat_map chars ~f:(fun pattern -> Core.String.substr_index_all line ~may_overlap:false ~pattern)
+    in
+    let type_after_locations =
+      type_at_locations
+      |> List.map ~f:((+) 1)
+    in
+    Core.String.substr_index_all line ~may_overlap:false ~pattern:" "
+    |> List.map ~f:((+) 1)
+    (* Always process start of line *)
+    |> fun l -> 0::l@type_after_locations
+  in
+  Core.String.split_lines source
+  |> List.map ~f:to_token_range
+
 let print_completion_entries ~with_types config source entries =
   if with_types then
     let input_ref = ref [] and output_ref = ref [] in
@@ -239,7 +261,8 @@ let reconstruct_identifier pipeline pos = function
         aux acc (succ i) in
     aux [] offset
 
-let dispatch pipeline (type a) : a Query_protocol.t -> a =
+let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
+  fun pipeline ->
   function
   | Type_expr (source, pos) ->
     with_typer pipeline @@ fun typer ->
@@ -766,6 +789,48 @@ let dispatch pipeline (type a) : a Query_protocol.t -> a =
     let loc_start l = l.Location.loc_start in
     let cmp l1 l2 = Lexing.compare_pos (loc_start l1) (loc_start l2) in
     List.sort ~cmp locs
+
+  | Lsif ->
+    (*lsif pipeline []*)
+    Format.printf "LISF triggered";
+    let raw_source = Mpipeline.raw_source pipeline in
+    let source = raw_source |> Msource.text in
+    let _line_ranges = _line_ranges source in
+    let _multiple_jsons : string list =
+      Core.List.foldi _line_ranges ~init:[] ~f:(fun line acc character_ranges ->
+          Format.eprintf "%2.0f%%%!" ((Core.Int.to_float line) /. (Core.Int.to_float (List.length _line_ranges)) *. 100.0);
+          Format.eprintf "\x1b[999D";
+          Format.eprintf "\x1b[2K";
+          Core.List.fold character_ranges ~init:acc ~f:(fun acc character ->
+              try
+                let range = `Logical (line+1, character) in
+                (*let enclosing = dispatch pipeline (Query_protocol.Enclosing range) in
+                  let json = dispatch pipeline (Query_protocol.Locate (prefix,lookfor,range)) in*)
+                let _type_info =
+                  let result =
+                    dispatch pipeline (Query_protocol.Type_enclosing (None,range,Some 0))
+                  in
+                  match result with
+                  | (_, `String type_info, _) :: _ ->
+                    Format.printf "Type_info: %s@." type_info;
+                    Some type_info
+                  | _ -> None
+                in
+                let json = `List [] in
+                let json =
+                  `Assoc
+                    [ "position", `List [`Int (line+1); `Int character]
+                    ; "enclosing", `List []
+                    ; "result", json
+                    ]
+                in
+                let stringified_json = Std.Json.to_string json in
+                stringified_json::acc
+              with _ -> acc)
+          |> Core.List.dedup_and_sort ~compare:Core.String.compare
+        )
+    in
+    `List []
 
   | Version ->
     Printf.sprintf "The Merlin toolkit version %s, for Ocaml %s\n"
