@@ -791,8 +791,6 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
     List.sort ~cmp locs
 
   | Lsif ->
-    (*lsif pipeline []*)
-    Format.printf "LISF triggered";
     let raw_source = Mpipeline.raw_source pipeline in
     let source = raw_source |> Msource.text in
     let line_ranges = line_ranges source in
