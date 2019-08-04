@@ -356,7 +356,7 @@ let header host root =
   ; entry_type = "vertex"
   ; label = "metaData"
   ; version = Some "0.4.0"
-  ; project_root = Some ("file://"^host^root)
+  ; project_root = Some ("file:///"^host^/root)
   ; tool_info = Some { name = "lsif-ocaml"; version = "0.1.0" }
   ; position_encoding = Some "utf-16"
   }
@@ -377,7 +377,7 @@ let document host project_root relative_filepath absolute_filepath =
   { Export.default with
     entry_type = "vertex"
   ; label = "document"
-  ; uri = Some ("file://"^/host^/project_root^/relative_filepath)
+  ; uri = Some ("file:///"^host^/project_root^/relative_filepath)
   ; language_id = Some "OCaml"
   (* FIXME *)
   ; contents = None
