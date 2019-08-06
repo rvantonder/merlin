@@ -278,7 +278,7 @@ let read_with_timeout read_from_channels =
       ~read:read_from_fds
       ~write:[]
       ~except:[]
-      ~timeout:(`After (Time.of_int_sec 10))
+      ~timeout:(`After (Time.of_int_sec 20))
       ()
     |> (fun { Unix.Select_fds.read; _ } -> read)
     |> List.map ~f:Unix.in_channel_of_descr
