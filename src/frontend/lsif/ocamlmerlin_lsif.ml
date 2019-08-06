@@ -7,6 +7,7 @@ module Json = Yojson.Safe
 let debug = Option.is_some (Sys.getenv "DEBUG_OCAML_LSIF")
 let parallel = true
 let emit_type_hovers = true
+let emit_definitions = true
 
 let i : int ref = ref 1
 
@@ -277,7 +278,7 @@ let read_with_timeout read_from_channels =
       ~read:read_from_fds
       ~write:[]
       ~except:[]
-      ~timeout:(`After (Time.of_int_sec 1))
+      ~timeout:(`After (Time.of_int_sec 10))
       ()
     |> (fun { Unix.Select_fds.read; _ } -> read)
     |> List.map ~f:Unix.in_channel_of_descr
@@ -330,7 +331,8 @@ let to_lsif merlin_results : intermediate_result =
   let open Option in
   let init = { hovers = []; definitions = [] } in
   List.fold merlin_results ~init ~f:(fun acc result ->
-      if debug then Format.printf "Merlin result: %s@." result;
+      let merlin_result = result in
+      if debug then Format.printf "Merlin result: %s@." merlin_result;
       let json = Json.from_string result in
       let result =
         match type_info_of_yojson json with
@@ -357,6 +359,11 @@ let to_lsif merlin_results : intermediate_result =
           (* Create an edge with 'next' to connect resultSet and declaration range above. *)
 
           (* Create a range vertex for the reference range *)
+          (*
+          if end_.col = -1 then
+            (* this happens when "not in environment type" *)
+            failwith (Format.sprintf "end_.col is -1 for merlin result: %s" merlin_result);
+*)
           let reference_range_vertex = Vertex.range (start.line - 1) start.col (end_.line - 1) end_.col in
           (* Create a 'next' edge to the result_set above *)
 
@@ -552,96 +559,99 @@ let () =
               end
           end;
         (* Emit definitions *)
-        let definitions =
-          List.concat_map
-            definitions
-            ~f:(fun
-                 { declaration_result_set_vertex
-                 ; declaration_range_vertex
-                 ; reference_range_vertex
-                 ; definition_result_vertex
-                 ; destination_file } ->
-                 let declaration_result_set_vertex = { declaration_result_set_vertex with id = Int.to_string (fresh ()) } in
-                 let declaration_range_vertex = { declaration_range_vertex with id = Int.to_string (fresh ()) } in
-                 let reference_range_vertex = { reference_range_vertex with id = Int.to_string (fresh ()) } in
-                 let definition_result_vertex = { definition_result_vertex with id = Int.to_string (fresh ()) } in
-                 let declaration_result_set_to_declaration_range_edge =
-                   connect
-                     ~out_v:declaration_range_vertex.id
-                     ~in_v:declaration_result_set_vertex.id
-                     ~label:"next"
-                     ()
-                 in
-                 let declaration_result_set_to_reference_range_edge =
-                   connect
-                     ~out_v:reference_range_vertex.id
-                     ~in_v:declaration_result_set_vertex.id
-                     ~label:"next"
-                     ()
-                 in
-                 let definition_result_to_declaration_result_set_edge =
-                   connect
-                     ~out_v:declaration_result_set_vertex.id
-                     ~in_v:definition_result_vertex.id
-                     ~label:"textDocument/definition"
-                     ()
-                 in
-                 let definition_result_to_document_and_range =
-                   let destination_file =
-                     match destination_file with
-                     | "*buffer*" -> absolute_filepath
-                     | filepath -> filepath
-                   in
-                   let document =
-                     match String.Table.find document_id_table destination_file with
-                     | Some id ->
-                       (* Already printed the previous time this was added to the table *)
-                       { document with id = Int.to_string id }
-                     | None ->
-                       let relative_filepath =
-                         match String.chop_prefix destination_file ~prefix:strip_prefix with
-                         | Some relative_filepath_in_project_path ->
-                           relative_filepath_in_project_path
+        if emit_definitions then
+          begin
+            let definitions =
+              List.concat_map
+                definitions
+                ~f:(fun
+                     { declaration_result_set_vertex
+                     ; declaration_range_vertex
+                     ; reference_range_vertex
+                     ; definition_result_vertex
+                     ; destination_file } ->
+                     let declaration_result_set_vertex = { declaration_result_set_vertex with id = Int.to_string (fresh ()) } in
+                     let declaration_range_vertex = { declaration_range_vertex with id = Int.to_string (fresh ()) } in
+                     let reference_range_vertex = { reference_range_vertex with id = Int.to_string (fresh ()) } in
+                     let definition_result_vertex = { definition_result_vertex with id = Int.to_string (fresh ()) } in
+                     let declaration_result_set_to_declaration_range_edge =
+                       connect
+                         ~out_v:declaration_range_vertex.id
+                         ~in_v:declaration_result_set_vertex.id
+                         ~label:"next"
+                         ()
+                     in
+                     let declaration_result_set_to_reference_range_edge =
+                       connect
+                         ~out_v:reference_range_vertex.id
+                         ~in_v:declaration_result_set_vertex.id
+                         ~label:"next"
+                         ()
+                     in
+                     let definition_result_to_declaration_result_set_edge =
+                       connect
+                         ~out_v:declaration_result_set_vertex.id
+                         ~in_v:definition_result_vertex.id
+                         ~label:"textDocument/definition"
+                         ()
+                     in
+                     let definition_result_to_document_and_range =
+                       let destination_file =
+                         match destination_file with
+                         | "*buffer*" -> absolute_filepath
+                         | filepath -> filepath
+                       in
+                       let document =
+                         match String.Table.find document_id_table destination_file with
+                         | Some id ->
+                           (* Already printed the previous time this was added to the table *)
+                           { document with id = Int.to_string id }
                          | None ->
-                           destination_file (* somewhere else, probably .opam *)
+                           let relative_filepath =
+                             match String.chop_prefix destination_file ~prefix:strip_prefix with
+                             | Some relative_filepath_in_project_path ->
+                               relative_filepath_in_project_path
+                             | None ->
+                               destination_file (* somewhere else, probably .opam *)
+                           in
+                           let document = make_document host project_root relative_filepath absolute_filepath in
+                           let id = fresh () in
+                           String.Table.add_exn document_id_table ~key:destination_file ~data:id;
+                           let document = { document with id = Int.to_string id } in
+                           Format.printf "%s@." @@ print document;
+                           let document_in_project_edge =
+                             connect ~out_v:project.id ~in_vs:[document.id] ~label:"contains" ()
+                           in
+                           Format.printf "%s@." @@ print document_in_project_edge;
+                           document
                        in
-                       let document = make_document host project_root relative_filepath absolute_filepath in
-                       let id = fresh () in
-                       String.Table.add_exn document_id_table ~key:destination_file ~data:id;
-                       let document = { document with id = Int.to_string id } in
-                       Format.printf "%s@." @@ print document;
-                       let document_in_project_edge =
-                         connect ~out_v:project.id ~in_vs:[document.id] ~label:"contains" ()
-                       in
-                       Format.printf "%s@." @@ print document_in_project_edge;
-                       document
-                   in
-                   connect
-                     ~out_v:definition_result_vertex.id
-                     ~in_vs:[declaration_range_vertex.id]
-                     ~document:(Int.of_string document.id)
-                     ~label:"item"
-                     ()
-                 in
-                 let single_definition_result =
-                   [ declaration_result_set_vertex
-                   ; declaration_range_vertex
-                   ; declaration_result_set_to_declaration_range_edge
-                   ; reference_range_vertex
-                   ; declaration_result_set_to_reference_range_edge
-                   ; definition_result_vertex
-                   ; definition_result_to_declaration_result_set_edge
-                   ; definition_result_to_document_and_range
-                   ]
-                 in
-                 (* can do this outside, but for lsif data it's easier to read when associated
-                    with the document *)
-                 List.iter single_definition_result ~f:(fun entry -> Format.printf "%s@." @@ print entry);
-                 single_definition_result)
-        in
-        if definitions <> [] then
-          let edges_entry = connect_ranges definitions document.id in
-          Format.printf "%s@." @@ print edges_entry;
+                       connect
+                         ~out_v:definition_result_vertex.id
+                         ~in_vs:[declaration_range_vertex.id]
+                         ~document:(Int.of_string document.id)
+                         ~label:"item"
+                         ()
+                     in
+                     let single_definition_result =
+                       [ declaration_result_set_vertex
+                       ; declaration_range_vertex
+                       ; declaration_result_set_to_declaration_range_edge
+                       ; reference_range_vertex
+                       ; declaration_result_set_to_reference_range_edge
+                       ; definition_result_vertex
+                       ; definition_result_to_declaration_result_set_edge
+                       ; definition_result_to_document_and_range
+                       ]
+                     in
+                     (* can do this outside, but for lsif data it's easier to read when associated
+                        with the document *)
+                     List.iter single_definition_result ~f:(fun entry -> Format.printf "%s@." @@ print entry);
+                     single_definition_result)
+            in
+            if definitions <> [] then
+              let edges_entry = connect_ranges definitions document.id in
+              Format.printf "%s@." @@ print edges_entry;
+          end;
       );
     begin
       try Scheduler.destroy scheduler
