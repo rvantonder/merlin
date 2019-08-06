@@ -218,16 +218,29 @@ module Import = struct
     | Definition of definition_info
 end
 
-(** Intermediate type so that edges and IDs can be connected after parallel vertex generation. *)
 type hover_result_vertices =
   { result_set_vertex : Export.entry
   ; range_vertex : Export.entry
   ; type_info_vertex : Export.entry
   }
 
+type definition_result_vertices =
+  { declaration_result_set_vertex : Export.entry
+  ; declaration_range_vertex : Export.entry
+  ; reference_range_vertex : Export.entry
+  ; definition_result_vertex : Export.entry
+  ; destination_file : string
+  }
+
+(** Intermediate type so that edges and IDs can be connected after parallel vertex generation. *)
+type intermediate_result =
+  { hovers : hover_result_vertices list
+  ; definitions : definition_result_vertices list
+  }
+
 type filepath_hover_results =
   { filepath : string
-  ; hovers : hover_result_vertices list
+  ; result : intermediate_result
   }
 
 let connect ?out_v ?in_v ?in_vs ~label () =
@@ -305,11 +318,12 @@ let call_merlin ~filename ~source ~dot_merlin =
   in
   read_source_from_stdin args source
 
-let to_lsif merlin_results : hover_result_vertices list =
+let to_lsif merlin_results : intermediate_result =
   let open Export in
   let open Import in
   let open Option in
-  List.fold merlin_results ~init:[] ~f:(fun acc result ->
+  let init = { hovers = []; definitions = [] } in
+  List.fold merlin_results ~init ~f:(fun acc result ->
       if debug then Format.printf "Merlin result: %s@." result;
       let json = Json.from_string result in
       let result =
@@ -328,15 +342,37 @@ let to_lsif merlin_results : hover_result_vertices list =
           let result_set_vertex = Vertex.result_set () in
           let range_vertex = Vertex.range (start.line - 1) start.col (end_.line - 1) end_.col in
           let type_info_vertex = Vertex.hover_result type_ in
-          if debug then Format.printf "XXX@.";
-          return { result_set_vertex; range_vertex; type_info_vertex }
-        | Definition { start = _; end_ = _; definition = _ } ->
-          None
+          return (`Hover { result_set_vertex; range_vertex; type_info_vertex })
+        | Definition { start; end_; definition = { file; pos } } ->
+          (* Create a resultSet vertex for the range where this definition is *)
+          let declaration_result_set_vertex = Vertex.result_set () in
+          (* Create the vertex range for it *)
+          let declaration_range_vertex = Vertex.range (pos.line - 1) pos.col (pos.line - 1) pos.col in
+          (* Create an edge with 'next' to connect resultSet and declaration range above. *)
+
+          (* Create a range vertex for the reference range *)
+          let reference_range_vertex = Vertex.range (start.line - 1) start.col (end_.line - 1) end_.col in
+          (* Create a 'next' edge to the result_set above *)
+
+          (* Create a definitionResult vertex *)
+          let definition_result_vertex = Vertex.result_set () in
+          (* Connect the definitionResult above to the resultset with textDocument/definition edge *)
+
+          (* Add "item" edge to connect the definitionResult vertex to the range for a particular document (id) *)
+          let destination_file = file in
+          return
+            (`Definition
+               { declaration_result_set_vertex
+               ; declaration_range_vertex
+               ; reference_range_vertex
+               ; definition_result_vertex
+               ; destination_file
+               })
       in
       match exported with
-      | Some result -> result::acc
+      | Some (`Hover result) -> { acc with hovers = result::acc.hovers }
+      | Some (`Definition result) -> { acc with definitions = result::acc.definitions }
       | None -> acc)
-  |> List.rev
 
 let process_filepath filename =
   if debug then Format.printf "File: %s@." filename;
@@ -442,27 +478,27 @@ let () =
     Format.printf "%s@." @@ print project;
     (* Get type information in parallel. *)
     let results =
-      List.map paths ~f:(fun filepath -> { filepath; hovers = process_filepath filepath })
+      List.map paths ~f:(fun filepath -> { filepath; result = process_filepath filepath })
     in
-(*
-    let results =
-      Scheduler.map_reduce
-        scheduler
-        paths
-        ~init:[]
-        ~map:(fun all_document_results document_paths ->
-            let documents_result =
+             (*
+             let results =
+             Scheduler.map_reduce
+             scheduler
+             paths
+             ~init:[]
+             ~map:(fun all_document_results document_paths ->
+             let documents_result =
               List.map document_paths ~f:(fun document_path ->
                   { filepath = document_path
                   ; hovers = process_filepath project.id document_path
                   })
-            in
-            documents_result@all_document_results)
-        ~reduce:(@)
-    in
-   *)
+             in
+             documents_result@all_document_results)
+             ~reduce:(@)
+             in
+           *)
     (* Generate IDs and connect vertices sequentially. *)
-    List.iter results ~f:(fun { filepath = absolute_filepath; hovers } ->
+    List.iter results ~f:(fun { filepath = absolute_filepath; result = { hovers; definitions = _ }  } ->
         let relative_filepath = String.chop_prefix_exn absolute_filepath ~prefix:strip_prefix in
         let document = document host project_root relative_filepath absolute_filepath in
         let document = { document with id = Int.to_string (fresh ()) } in
@@ -471,6 +507,9 @@ let () =
           connect ~out_v:project.id ~in_vs:[document.id] ~label:"contains" ()
         in
         Format.printf "%s@." @@ print document_in_project_edge;
+        (* Reverse list for in-order printing *)
+        let hovers = List.rev hovers in
+        (* Emit type info *)
         let hovers =
           List.concat_map hovers ~f:(fun { result_set_vertex; range_vertex; type_info_vertex } ->
               let result_set_vertex = { result_set_vertex with id = Int.to_string (fresh ()) } in
@@ -489,7 +528,11 @@ let () =
         in
         List.iter hovers ~f:(fun entry -> Format.printf "%s@." @@ print entry);
         let edges_entry = connect_ranges hovers document.id in
-        Format.printf "%s@." @@ print edges_entry);
+        Format.printf "%s@." @@ print edges_entry;
+        (* Emit definitions *)
+        let _definitions = () in
+        ()
+      );
     begin
       try Scheduler.destroy scheduler
       with Unix.Unix_error (_,"kill",_) -> ()
