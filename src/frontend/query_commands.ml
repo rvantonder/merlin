@@ -839,11 +839,12 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
       in
       let result = dispatch pipeline (Query_protocol.Locate (None,`ML,cursor)) in
       let json =
+        (* Found can some times still resolve even when "Not in environment" happens,
+           for example, a 0,0 pos in .mli file *)
         match result with
         | `Found (Some file, pos) ->
           Some (`Assoc ["file", `String file; "pos", Lexing.json_of_position pos])
         | `Found (None, pos) ->
-          (* TODO: use 'this' file *)
           Some (`Assoc ["pos", Lexing.json_of_position pos])
         | _ -> None
       in
