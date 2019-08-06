@@ -6,7 +6,7 @@ module Json = Yojson.Safe
 
 let debug = Option.is_some (Sys.getenv "DEBUG_OCAML_LSIF")
 let parallel = true
-let emit_type_hovers = false
+let emit_type_hovers = true
 
 let i : int ref = ref 1
 
@@ -544,9 +544,12 @@ let () =
                   [result_set_vertex; range_vertex; result_set_edge; type_info_vertex; hover_edge]
                 )
             in
-            List.iter hovers ~f:(fun entry -> Format.printf "%s@." @@ print entry);
-            let edges_entry = connect_ranges hovers document.id in
-            Format.printf "%s@." @@ print edges_entry;
+            if hovers <> [] then
+              begin
+                List.iter hovers ~f:(fun entry -> Format.printf "%s@." @@ print entry);
+                let edges_entry = connect_ranges hovers document.id in
+                Format.printf "%s@." @@ print edges_entry;
+              end
           end;
         (* Emit definitions *)
         let definitions =
