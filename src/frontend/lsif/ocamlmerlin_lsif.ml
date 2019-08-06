@@ -636,8 +636,9 @@ let () =
                  List.iter single_definition_result ~f:(fun entry -> Format.printf "%s@." @@ print entry);
                  single_definition_result)
         in
-        let edges_entry = connect_ranges definitions document.id in
-        Format.printf "%s@." @@ print edges_entry;
+        if definitions <> [] then
+          let edges_entry = connect_ranges definitions document.id in
+          Format.printf "%s@." @@ print edges_entry;
       );
     begin
       try Scheduler.destroy scheduler
