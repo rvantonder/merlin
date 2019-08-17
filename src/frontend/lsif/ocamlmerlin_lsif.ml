@@ -355,7 +355,7 @@ let to_lsif merlin_results : intermediate_result =
           (* Create a resultSet vertex for the range where this definition is *)
           let declaration_result_set_vertex = Vertex.result_set () in
           (* Create the vertex range for it *)
-          let declaration_range_vertex = Vertex.range (pos.line - 1) pos.col (pos.line - 1) pos.col in
+          let declaration_range_vertex = Vertex.range (pos.line - 1) (pos.col - 1) (pos.line - 1) (pos.col - 1) in
           (* Create an edge with 'next' to connect resultSet and declaration range above. *)
 
           (* Create a range vertex for the reference range *)
