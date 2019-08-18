@@ -1,20 +1,18 @@
 open Core
-open Hack_parallel
 
 module Time = Core_kernel.Time_ns.Span
 module Json = Yojson.Safe
 
 let debug = Option.is_some (Sys.getenv "DEBUG_OCAML_LSIF")
-let parallel = true
 let emit_type_hovers = true
-let emit_definitions = false
+let emit_definitions = true
 
 let i : int ref = ref 1
 
 let fresh () =
   let id = !i in
   i := !i + 1;
-  id
+  Int.to_string id
 
 (* skip or continue directory descent *)
 type 'a next =
@@ -237,7 +235,6 @@ type definition_result_vertices =
   ; destination_file : string
   }
 
-(** Intermediate type so that edges and IDs can be connected after parallel vertex generation. *)
 type intermediate_result =
   { hovers : hover_result_vertices list
   ; definitions : definition_result_vertices list
@@ -251,7 +248,7 @@ type filepath_hover_results =
 let connect ?out_v ?in_v ?in_vs ?document ~label () =
   if Option.is_some in_v then
     { Export.default with
-      id = Int.to_string (fresh ())
+      id = fresh ()
     ; entry_type = "edge"
     ; label
     ; out_v
@@ -260,7 +257,7 @@ let connect ?out_v ?in_v ?in_vs ?document ~label () =
     }
   else if Option.is_some in_vs then
     { Export.default with
-      id = Int.to_string (fresh ())
+      id = fresh ()
     ; entry_type = "edge"
     ; label
     ; out_v
@@ -270,71 +267,14 @@ let connect ?out_v ?in_v ?in_vs ?document ~label () =
   else
     failwith "Do not call with both in_v and in_vs"
 
-let read_with_timeout ?(timeout = `Never) read_from_channels =
-  let read_from_fds = List.map ~f:Unix.descr_of_in_channel read_from_channels in
-  let read_from_channels =
-    Unix.select
-      ~read:read_from_fds
-      ~write:[]
-      ~except:[]
-      (* FIXME *)
-      ~timeout:timeout
-      ()
-    |> (fun { Unix.Select_fds.read; _ } -> read)
-    |> List.map ~f:Unix.in_channel_of_descr
-  in
-  List.map read_from_channels ~f:In_channel.input_all
-  |> String.concat ~sep:"\n"
-
-let read_source_from_stdin args source =
-  let Unix.Process_info.{ stdin; stdout; stderr; pid } =
-    (* FIXME *)
-    Unix.create_process ~prog:"/Users/rvt/merlin/ocamlmerlin" ~args
-  in
-  let stdin = Unix.out_channel_of_descr stdin in
-  let stdout = Unix.in_channel_of_descr stdout in
-  let stderr = Unix.in_channel_of_descr stderr in
-  Out_channel.output_string stdin source;
-  Out_channel.flush stdin;
-  Out_channel.close stdin;
-  let result = read_with_timeout [stdout] in
-  In_channel.close stdout;
-  In_channel.close stderr;
-  Out_channel.close stdin;
-  let _finished = Unix.waitpid pid in
-  result
-
-let lookup_dot_merlin filename =
-  let dot_merlin_path = Filename.dirname filename ^/ ".merlin" in
-  if Sys.is_file dot_merlin_path = `Yes then
-    begin
-      if debug then Format.printf "Merlin: %s@." dot_merlin_path;
-      Some dot_merlin_path
-    end
-  else
-    begin
-      if debug then Format.printf "NO MERLIN: %s@." dot_merlin_path;
-      None
-    end
-
-let call_merlin ~filename ~source ~dot_merlin =
-  let args =
-    [ "server"
-    ; "lsif"
-    ; filename
-    ] @ dot_merlin
-  in
-  read_source_from_stdin args source
-
 let to_lsif merlin_results : intermediate_result =
   let open Export in
   let open Import in
   let open Option in
   let init = { hovers = []; definitions = [] } in
-  List.fold merlin_results ~init ~f:(fun acc result ->
-      let merlin_result = result in
+  List.fold merlin_results ~init ~f:(fun acc merlin_result ->
       if debug then Format.printf "Merlin result: %s@." merlin_result;
-      let json = Json.from_string result in
+      let json = Json.from_string merlin_result in
       let result =
         match type_info_of_yojson json with
         | Ok t -> Some (Type_info t)
@@ -390,19 +330,13 @@ let to_lsif merlin_results : intermediate_result =
 
 let process_filepath filename =
   if debug then Format.printf "File: %s@." filename;
-  let dot_merlin =
-    match lookup_dot_merlin filename with
-    | Some dot_merlin -> ["-dot-merlin"; dot_merlin]
-    | None -> []
-  in
-  let source = In_channel.read_all filename in
-  let merlin_result = call_merlin ~filename ~source ~dot_merlin in
-  let merlin_result = String.split_lines merlin_result in
-  to_lsif merlin_result
+  In_channel.read_all (filename ^ ".lsif")
+  |> String.split_lines
+  |> to_lsif
 
 let header host root =
   { Export.default with
-    id = Int.to_string (fresh ())
+    id = fresh ()
   ; entry_type = "vertex"
   ; label = "metaData"
   ; version = Some "0.4.0"
@@ -413,7 +347,7 @@ let header host root =
 
 let project () =
   { Export.default with
-    id = Int.to_string (fresh ())
+    id = fresh ()
   ; entry_type = "vertex"
   ; label = "project"
   ; kind = Some "OCaml"
@@ -475,42 +409,17 @@ type flags =
   ; strip_prefix : string (* the prefix to strip from the absolute root *)
   (* ; type_info_only : bool *)
   (* ; include_base64 : bool *)
-  (* ; number_of_workers : int *)
   }
 
 let () =
-  Scheduler.Daemon.check_entry_point ();
   match Sys.argv |> Array.to_list with
   | _ :: local_absolute_root :: strip_prefix :: host :: project_root :: _ ->
-    let n = "1" in (* FIXME *)
-    let number_of_workers = if parallel then Int.of_string n else 1 in
-    let scheduler = Scheduler.create ~number_of_workers () in
     let paths = paths local_absolute_root in
     let header = header host project_root in
     let project = project () in
     Format.printf "%s@." @@ print header;
     Format.printf "%s@." @@ print project;
-    (* Get type information in parallel. *)
-    let results =
-      List.map paths ~f:(fun filepath -> { filepath; result = process_filepath filepath })
-    in
-             (*
-             let results =
-             Scheduler.map_reduce
-             scheduler
-             paths
-             ~init:[]
-             ~map:(fun all_document_results document_paths ->
-             let documents_result =
-              List.map document_paths ~f:(fun document_path ->
-                  { filepath = document_path
-                  ; hovers = process_filepath project.id document_path
-                  })
-             in
-             documents_result@all_document_results)
-             ~reduce:(@)
-             in
-           *)
+    let results = List.map paths ~f:(fun filepath -> { filepath; result = process_filepath filepath }) in
     (* Generate IDs and connect vertices sequentially. *)
     let document_id_table = String.Table.create () in
     List.iter results ~f:(fun { filepath = absolute_filepath; result = { hovers; definitions } } ->
@@ -521,7 +430,7 @@ let () =
           match String.Table.find document_id_table absolute_filepath with
           | Some id -> { document with id = Int.to_string id }
           | None ->
-            let id = fresh () in
+            let id = Int.of_string (fresh ()) in
             String.Table.add_exn document_id_table ~key:absolute_filepath ~data:id;
             let document = { document with id = Int.to_string id } in
             Format.printf "%s@." @@ print document;
@@ -538,13 +447,13 @@ let () =
             (* Emit type info *)
             let hovers =
               List.concat_map hovers ~f:(fun { result_set_vertex; range_vertex; type_info_vertex } ->
-                  let result_set_vertex = { result_set_vertex with id = Int.to_string (fresh ()) } in
-                  let range_vertex = { range_vertex with id = Int.to_string (fresh ()) } in
+                  let result_set_vertex = { result_set_vertex with id = fresh () } in
+                  let range_vertex = { range_vertex with id = fresh () } in
                   (* Connect range (outV) to resultSet (inV). *)
                   let result_set_edge =
                     connect ~out_v:range_vertex.id ~in_v:result_set_vertex.id ~label:"next" ()
                   in
-                  let type_info_vertex = { type_info_vertex with id = Int.to_string (fresh ()) } in
+                  let type_info_vertex = { type_info_vertex with id = fresh () } in
                   (* Connect resultSet (outV) to hoverResult (inV). *)
                   let hover_edge =
                     connect ~in_v:type_info_vertex.id ~out_v:result_set_vertex.id ~label:"textDocument/hover" ()
@@ -571,10 +480,10 @@ let () =
                      ; reference_range_vertex
                      ; definition_result_vertex
                      ; destination_file } ->
-                     let declaration_result_set_vertex = { declaration_result_set_vertex with id = Int.to_string (fresh ()) } in
-                     let declaration_range_vertex = { declaration_range_vertex with id = Int.to_string (fresh ()) } in
-                     let reference_range_vertex = { reference_range_vertex with id = Int.to_string (fresh ()) } in
-                     let definition_result_vertex = { definition_result_vertex with id = Int.to_string (fresh ()) } in
+                     let declaration_result_set_vertex = { declaration_result_set_vertex with id = fresh () } in
+                     let declaration_range_vertex = { declaration_range_vertex with id = fresh () } in
+                     let reference_range_vertex = { reference_range_vertex with id = fresh () } in
+                     let definition_result_vertex = { definition_result_vertex with id = fresh () } in
                      let declaration_result_set_to_declaration_range_edge =
                        connect
                          ~out_v:declaration_range_vertex.id
@@ -616,7 +525,7 @@ let () =
                                destination_file (* somewhere else, probably .opam *)
                            in
                            let document = make_document host project_root relative_filepath absolute_filepath in
-                           let id = fresh () in
+                           let id = Int.of_string (fresh ()) in
                            String.Table.add_exn document_id_table ~key:destination_file ~data:id;
                            let document = { document with id = Int.to_string id } in
                            Format.printf "%s@." @@ print document;
@@ -654,9 +563,5 @@ let () =
               Format.printf "%s@." @@ print edges_entry;
           end;
       );
-    begin
-      try Scheduler.destroy scheduler
-      with Unix.Unix_error (_,"kill",_) -> ()
-    end
   | _ ->
     Format.eprintf "local_root(/Users/merlin/src) strip_prefix(/Users/.../) host(github.com) project(ocaml/merlin)"
