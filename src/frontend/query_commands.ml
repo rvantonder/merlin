@@ -859,7 +859,7 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
       Core.List.foldi line_ranges ~init:String.Set.empty ~f:(fun line acc character_ranges ->
           if line mod 20 = 0 then
             Format.eprintf "%2.0f%%%!" ((Core.Int.to_float line) /. (Core.Int.to_float (List.length line_ranges)) *. 100.0);
-          Format.eprintf "\x1b[999D%!";
+          Format.eprintf "\x1b[999D";
           Format.eprintf "\x1b[2K";
           Core.List.fold character_ranges ~init:acc ~f:(fun acc character ->
               let cursor = `Logical (line+1, character) in
@@ -875,17 +875,23 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
               in
               let acc =
                 (* try: 'blah contains the compiled interface for blah blah... *)
-                try
-                  let location_result = location_at_cursor cursor in
-                  match location_result with
-                  | Some json ->
-                    let stringified_json = Std.Json.to_string json in
-                    String.Set.add stringified_json acc
-                  | None -> acc
-                with _ -> acc
+                let emit_location = true in
+                if emit_location then
+                  try
+                    let location_result = location_at_cursor cursor in
+                    match location_result with
+                    | Some json ->
+                      let stringified_json = Std.Json.to_string json in
+                      String.Set.add stringified_json acc
+                    | None -> acc
+                  with _ ->
+                    acc
+                else
+                  acc
               in
               acc))
     in
+    Format.eprintf "\x1b[999D%!";
     String.Set.iter entries ~f:(Format.printf "%s@.");
     `List []
 

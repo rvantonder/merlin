@@ -7,7 +7,7 @@ module Json = Yojson.Safe
 let debug = Option.is_some (Sys.getenv "DEBUG_OCAML_LSIF")
 let parallel = true
 let emit_type_hovers = true
-let emit_definitions = true
+let emit_definitions = false
 
 let i : int ref = ref 1
 
@@ -270,15 +270,15 @@ let connect ?out_v ?in_v ?in_vs ?document ~label () =
   else
     failwith "Do not call with both in_v and in_vs"
 
-let read_with_timeout read_from_channels =
+let read_with_timeout ?(timeout = `Never) read_from_channels =
   let read_from_fds = List.map ~f:Unix.descr_of_in_channel read_from_channels in
   let read_from_channels =
     Unix.select
-      ~restart:true
       ~read:read_from_fds
       ~write:[]
       ~except:[]
-      ~timeout:(`After (Time.of_int_sec 20))
+      (* FIXME *)
+      ~timeout:timeout
       ()
     |> (fun { Unix.Select_fds.read; _ } -> read)
     |> List.map ~f:Unix.in_channel_of_descr
@@ -288,6 +288,7 @@ let read_with_timeout read_from_channels =
 
 let read_source_from_stdin args source =
   let Unix.Process_info.{ stdin; stdout; stderr; pid } =
+    (* FIXME *)
     Unix.create_process ~prog:"/Users/rvt/merlin/ocamlmerlin" ~args
   in
   let stdin = Unix.out_channel_of_descr stdin in
