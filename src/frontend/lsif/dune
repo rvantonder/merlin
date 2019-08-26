@@ -1,6 +1,0 @@
-(executable
- (name ocamlmerlin_lsif)
- (package merlin-lsif)
- (public_name ocamlmerlin-lsif)
-  (libraries core core_extended.base64 core.uuid ppx_deriving_yojson ppx_deriving_yojson.runtime hack_parallel lsif)
- (preprocess (pps ppx_deriving_yojson ppx_let ppx_deriving.show)))
