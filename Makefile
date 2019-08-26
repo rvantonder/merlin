@@ -6,7 +6,7 @@ build:
 workspace:
 	dune build --workspace=dune-workspace.template merlin.install
 
-ocamlmerlin ocamlmerlin-server ocamlmerlin-lsp ocamlmerlin-lsif:
+ocamlmerlin-with-lsif ocamlmerlin-server-lsif:
 	ln -s _build/install/default/bin/$@ ./$@
 
 clean:

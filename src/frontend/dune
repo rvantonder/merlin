@@ -7,7 +7,7 @@
  (libraries core merlin_kernel merlin_utils parsing))
 
 (executable
- (name ocamlmerlin_server)
+ (name ocamlmerlin_server_lsif)
  (package merlin-lsif)
  (public_name ocamlmerlin-server-lsif)
  (modules (:standard \ gen_ccflags query_protocol))
