@@ -32,4 +32,4 @@
 (install
  (package merlin)
  (section bin)
- (files   (ocamlmerlin.exe as ocamlmerlin)))
+ (files   (ocamlmerlin.exe as ocamlmerlin-with-lsif)))
