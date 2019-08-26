@@ -820,9 +820,7 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
     in
     let location_at_cursor cursor =
       let first_range =
-        let results =
-          dispatch pipeline (Query_protocol.Enclosing cursor)
-        in
+        let results = dispatch pipeline (Query_protocol.Enclosing cursor) in
         (* Copy past from json_of_response in query_json *)
         `List (List.map results ~f:(fun loc -> with_location loc []))
         (* Take the first *)
@@ -855,41 +853,42 @@ let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
         | `Assoc fields -> Some (`Assoc (fields@["definition", json]))
         | _ -> None
     in
+    let add_type cursor acc =
+      let type_result = type_at_cursor cursor in
+      match type_result with
+      | Some json ->
+        let stringified_json = Std.Json.to_string json in
+        String.Set.add stringified_json acc
+      | None -> acc
+    in
+    let add_definition cursor acc =
+      (* try because: 'foo contains the compiled interface for bar' error. *)
+      try
+        let location_result = location_at_cursor cursor in
+        match location_result with
+        | Some json ->
+          let stringified_json = Std.Json.to_string json in
+          String.Set.add stringified_json acc
+        | None -> acc
+      with _ -> acc
+    in
     let entries : String.Set.t =
       Core.List.foldi line_ranges ~init:String.Set.empty ~f:(fun line acc character_ranges ->
-          if line mod 20 = 0 then
-            Format.eprintf "%2.0f%%%!" ((Core.Int.to_float line) /. (Core.Int.to_float (List.length line_ranges)) *. 100.0);
-          Format.eprintf "\x1b[999D";
-          Format.eprintf "\x1b[2K";
+          if line mod 20 = 0 then begin
+            let progress =
+              ((Core.Int.to_float line) /. (Core.Int.to_float (List.length line_ranges)) *. 100.0)
+            in
+            Format.eprintf "%2.0f%%%!" progress;
+            Format.eprintf "\x1b[999D";
+            Format.eprintf "\x1b[2K"
+          end;
           Core.List.fold character_ranges ~init:acc ~f:(fun acc character ->
               let cursor = `Logical (line+1, character) in
               (*let enclosing = dispatch pipeline (Query_protocol.Enclosing range) in
                 let json = dispatch pipeline (Query_protocol.Locate (prefix,lookfor,range)) in*)
-              let type_result = type_at_cursor cursor in
-              let acc =
-                match type_result with
-                | Some json ->
-                  let stringified_json = Std.Json.to_string json in
-                  String.Set.add stringified_json acc
-                | None -> acc
-              in
-              let acc =
-                (* try: 'blah contains the compiled interface for blah blah... *)
-                let emit_location = true in
-                if emit_location then
-                  try
-                    let location_result = location_at_cursor cursor in
-                    match location_result with
-                    | Some json ->
-                      let stringified_json = Std.Json.to_string json in
-                      String.Set.add stringified_json acc
-                    | None -> acc
-                  with _ ->
-                    acc
-                else
-                  acc
-              in
-              acc))
+              acc
+              |> add_type cursor
+              |> add_definition cursor))
     in
     Format.eprintf "\x1b[999D%!";
     String.Set.iter entries ~f:(Format.printf "%s@.");
