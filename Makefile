@@ -1,4 +1,4 @@
-all: build ocamlmerlin ocamlmerlin-server ocamlmerlin-lsp ocamlmerlin-lsif
+all: build ocamlmerlin-with-lsif ocamlmerlin-server-lsif
 
 build:
 	dune build
