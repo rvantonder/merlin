@@ -1,5 +1,4 @@
 opam-version: "2.0"
-name:         "merlin"
 maintainer:   "defree@gmail.com"
 authors:      "The Merlin team"
 homepage:     "https://github.com/ocaml/merlin"
@@ -11,11 +10,12 @@ build: [
   ["dune" "runtest" "-p" name "-j" jobs] {with-test}
 ]
 depends: [
-  "ocaml" {>= "4.02.1" & < "4.09"}
+  "ocaml" {>= "4.02.1" & < "4.10"}
   "dune" {>= "1.8.0"}
   "ocamlfind" {>= "1.5.2"}
-  "yojson"
+  "yojson" {>= "1.6.0"}
   "mdx" {with-test & >= "1.3.0"}
+  "conf-jq" {with-test}
 ]
 synopsis:
   "Editor helper, provides completion, typing and source browsing in Vim and Emacs"

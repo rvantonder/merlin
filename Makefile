@@ -1,23 +1,23 @@
-all: build ocamlmerlin ocamlmerlin-server ocamlmerlin-lsp
+all: build ocamlmerlin ocamlmerlin-server
 
 build:
-	dune build
+	dune build --always-show-command-line
 
 workspace:
-	dune build --workspace=dune-workspace.template merlin.install
+	dune build --always-show-command-line --workspace=dune-workspace.template
 
-ocamlmerlin ocamlmerlin-server ocamlmerlin-lsp:
+ocamlmerlin ocamlmerlin-server:
 	ln -s _build/install/default/bin/$@ ./$@
 
 clean:
 	dune clean
 
 test:
-	dune build --workspace=dune-workspace.test merlin.install
-	dune runtest --workspace=dune-workspace.test --force
+	dune build --always-show-command-line --workspace=dune-workspace.test
+	dune runtest --workspace=dune-workspace.test
 
 preprocess:
-	dune build @preprocess
+	dune build --always-show-command-line @preprocess
 
 promote:
 	dune promote
