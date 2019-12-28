@@ -1,3 +1,4 @@
+open Core
 open Std
 
 type command =
@@ -52,7 +53,7 @@ let marg_completion_kind f = Marg.param "completion-kind"
     )
 
 let rec find_command name = function
-  | [] -> raise Not_found
+  | [] -> assert false
   | (Command (name', _, _, _, _) as command) :: xs ->
     if name = name' then
       command
@@ -376,6 +377,15 @@ Returns either:
       | `None -> failwith "-identifier-at <pos> is mandatory"
       | `Ident_at pos ->
         run buffer (Query_protocol.Occurrences (`Ident_at pos))
+    end
+  ;
+
+  command "lsif"
+    ~spec: []
+    ~doc:"Dump LSIF data."
+    ~default:()
+    begin fun buffer () ->
+      run buffer (Query_protocol.Lsif)
     end
   ;
 
