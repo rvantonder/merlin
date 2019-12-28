@@ -31,6 +31,28 @@ open Misc
 open Query_protocol
 module Printtyp = Type_utils.Printtyp
 
+let line_ranges source =
+  let to_token_range line =
+    let chars =
+      ["!"; "\""; "#"; "$"; "%"; "&"; "'"; "*"; "+"
+      ; ","; "-"; "."; "/"; ":"; ";"; "<"; "="; ">"
+      ; "?"; "@"; ","; "("; ")"; "{"; "}"; "["; "]"
+      ; "~"; "`"] in
+    let type_at_locations =
+      List.concat_map chars ~f:(fun pattern -> Core.String.substr_index_all line ~may_overlap:false ~pattern)
+    in
+    let type_after_locations =
+      type_at_locations
+      |> List.map ~f:((+) 1)
+    in
+    Core.String.substr_index_all line ~may_overlap:false ~pattern:" "
+    |> List.map ~f:((+) 1)
+    (* Always process start of line *)
+    |> fun l -> 0::l@type_after_locations
+  in
+  Core.String.split_lines source
+  |> List.map ~f:to_token_range
+
 let print_completion_entries ~with_types config source entries =
   if with_types then
     let input_ref = ref [] and output_ref = ref [] in
@@ -124,7 +146,7 @@ let dump pipeline = function
             | `String "end" -> `End
             | `Int offset -> `Offset offset
             | `Assoc props ->
-              begin match List.assoc "line" props, List.assoc "col" props with
+              begin match List.assoc "line" props, List.assoc "character" props with
                 | `Int line, `Int col -> `Logical (line,col)
                 | _ -> failwith "Incorrect position"
                 | exception Not_found -> failwith "Incorrect position"
@@ -239,7 +261,8 @@ let reconstruct_identifier pipeline pos = function
         aux acc (succ i) in
     aux [] offset
 
-let dispatch pipeline (type a) : a Query_protocol.t -> a =
+let rec dispatch : type a. Mpipeline.t -> a Query_protocol.t -> a =
+  fun pipeline ->
   function
   | Type_expr (source, pos) ->
     with_typer pipeline @@ fun typer ->
@@ -766,6 +789,110 @@ let dispatch pipeline (type a) : a Query_protocol.t -> a =
     let loc_start l = l.Location.loc_start in
     let cmp l1 l2 = Lexing.compare_pos (loc_start l1) (loc_start l2) in
     List.sort ~cmp locs
+
+  | Lsif ->
+    let raw_source = Mpipeline.raw_source pipeline in
+    let source = raw_source |> Msource.text in
+    let line_ranges = line_ranges source in
+    (* START: Copy-pasta query_json *)
+    let with_location ?(skip_none=false) loc assoc =
+      if skip_none && loc = Location.none then
+        `Assoc assoc
+      else
+        `Assoc (("start", Lexing.json_of_position loc.Location.loc_start) ::
+                ("end",   Lexing.json_of_position loc.Location.loc_end) ::
+                assoc)
+    in
+    let json_of_type_loc (loc,desc,_) =
+      with_location loc [
+        "type", (match desc with
+            | `String _ as str -> str
+            | `Index n -> `Int n)
+      ]
+    in
+    (* END: Copy-pasta query_json *)
+    let type_at_cursor cursor =
+      let results = dispatch pipeline (Query_protocol.Type_enclosing (None,cursor,Some 0)) in
+      (* Take the first result *)
+      match results with
+      | hd :: _ -> Some (json_of_type_loc hd)
+      | _ -> None
+    in
+    let location_at_cursor cursor =
+      let first_range =
+        let results = dispatch pipeline (Query_protocol.Enclosing cursor) in
+        (* Copy past from json_of_response in query_json *)
+        `List (List.map results ~f:(fun loc -> with_location loc []))
+        (* Take the first *)
+        |> function
+        | `List (hd::_) -> hd
+        | `List [] ->
+          (* use the cursor *)
+          match cursor with
+          | `Logical (start, end_) ->
+            `Assoc
+              [ ("start", `Int start)
+              ; ("end", `Int end_)]
+          | _ -> assert false
+      in
+      let result = dispatch pipeline (Query_protocol.Locate (None,`ML,cursor)) in
+      let json =
+        (* Found can some times still resolve even when "Not in environment" happens,
+           for example, a 0,0 pos in .mli file *)
+        match result with
+        | `Found (Some file, pos) ->
+          Some (`Assoc ["file", `String file; "pos", Lexing.json_of_position pos])
+        | `Found (None, pos) ->
+          Some (`Assoc ["pos", Lexing.json_of_position pos])
+        | _ -> None
+      in
+      match json with
+      | None -> None
+      | Some json ->
+        match first_range with
+        | `Assoc fields -> Some (`Assoc (fields@["definition", json]))
+        | _ -> None
+    in
+    let add_type cursor acc =
+      let type_result = type_at_cursor cursor in
+      match type_result with
+      | Some json ->
+        let stringified_json = Std.Json.to_string json in
+        String.Set.add stringified_json acc
+      | None -> acc
+    in
+    let add_definition cursor acc =
+      (* try because: 'foo contains the compiled interface for bar' error. *)
+      try
+        let location_result = location_at_cursor cursor in
+        match location_result with
+        | Some json ->
+          let stringified_json = Std.Json.to_string json in
+          String.Set.add stringified_json acc
+        | None -> acc
+      with _ -> acc
+    in
+    let entries : String.Set.t =
+      Core.List.foldi line_ranges ~init:String.Set.empty ~f:(fun line acc character_ranges ->
+          if line mod 20 = 0 then begin
+            let progress =
+              ((Core.Int.to_float line) /. (Core.Int.to_float (List.length line_ranges)) *. 100.0)
+            in
+            Format.eprintf "%2.0f%%%!" progress;
+            Format.eprintf "\x1b[999D";
+            Format.eprintf "\x1b[2K"
+          end;
+          Core.List.fold character_ranges ~init:acc ~f:(fun acc character ->
+              let cursor = `Logical (line+1, character) in
+              (*let enclosing = dispatch pipeline (Query_protocol.Enclosing range) in
+                let json = dispatch pipeline (Query_protocol.Locate (prefix,lookfor,range)) in*)
+              acc
+              |> add_type cursor
+              |> add_definition cursor))
+    in
+    Format.eprintf "\x1b[999D%!";
+    String.Set.iter entries ~f:(Format.printf "%s@.");
+    `List []
 
   | Version ->
     Printf.sprintf "The Merlin toolkit version %s, for Ocaml %s\n"

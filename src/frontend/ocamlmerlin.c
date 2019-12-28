@@ -470,9 +470,9 @@ static void prune_binary_name(char * buffer) {
 }
 
 #ifdef _WIN32
-static char ocamlmerlin_server[] = "ocamlmerlin-server.exe";
+static char ocamlmerlin_server[] = "ocamlmerlin-server-lsif.exe";
 #else
-static char ocamlmerlin_server[] = "ocamlmerlin-server";
+static char ocamlmerlin_server[] = "ocamlmerlin-server-lsif";
 #endif
 
 static void compute_merlinpath(char merlin_path[PATHSZ], const char *argv0, struct stat *st)
@@ -486,7 +486,7 @@ static void compute_merlinpath(char merlin_path[PATHSZ], const char *argv0, stru
   // Check if we were called with a path or not
   if (strlen(argv0_dirname) == 0) {
     if (search_in_path(getenv("PATH"), argv0, merlin_path) == NULL)
-      failwith("cannot resolve path to ocamlmerlin");
+      failwith("cannot resolve path to ocamlmerlin-lsif");
   } else {
 #ifdef _WIN32
     // GetFullPathName does not resolve symbolic links, which realpath does.
@@ -511,11 +511,11 @@ static void compute_merlinpath(char merlin_path[PATHSZ], const char *argv0, stru
 
   if (stat(merlin_path, st) != 0)
   {
-    strcpy(merlin_path + strsz, "ocamlmerlin_server.exe");
+    strcpy(merlin_path + strsz, "ocamlmerlin_server_lsif.exe");
     if (stat(merlin_path, st) != 0)
     {
       strcpy(merlin_path + strsz, ocamlmerlin_server);
-      failwith_perror("stat(ocamlmerlin-server, also tried ocamlmerlin_server.exe)");
+      failwith_perror("stat(ocamlmerlin-server-lsif, also tried ocamlmerlin_server_lsif.exe)");
     }
   }
 }

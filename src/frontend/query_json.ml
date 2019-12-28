@@ -193,6 +193,7 @@ let dump (type a) : a t -> json =
                                          | `Unqualify -> "unqualify");
       "position", mk_position pos;
     ]
+  | Lsif -> mk "lsif" []
   | Version -> mk "version" []
 
 let string_of_completion_kind = function
@@ -379,5 +380,6 @@ let json_of_response (type a) (query : a t) (response : a) : json =
   | Occurrences _, locations ->
     `List (List.map locations
              ~f:(fun loc -> with_location loc []))
+  | Lsif, json -> json
   | Version, version ->
     `String version

@@ -1,0 +1,22 @@
+opam-version: "2.0"
+name:         "merlin-lsif"
+maintainer:   "rvantonder@gmail.com"
+authors:      "The Merlin team, modification Rijnard van Tonder"
+homepage:     "https://github.com/rvantonder/merlin-lsif"
+bug-reports:  "https://github.com/rvantonder/merlin-lsif/issues"
+dev-repo: "git+https://github.com/rvantonder/merlin-lsif.git"
+build: [
+  ["dune" "subst"] {pinned}
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]
+depends: [
+  "ocaml" {>= "4.02.1" & < "4.09"}
+  "dune" {>= "1.8.0"}
+  "ocamlfind" {>= "1.5.2"}
+  "yojson"
+  "mdx" {with-test & >= "1.3.0"}
+  "core"
+]
+synopsis:
+  "Support for dumping LSIF data in Merlin"

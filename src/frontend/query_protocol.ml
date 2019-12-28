@@ -178,5 +178,6 @@ type _ t =
   | Occurrences(* *)
     : [`Ident_at of Msource.position]
       -> Location.t list t
+  | Lsif : Std.json t
   | Version
     : string t
